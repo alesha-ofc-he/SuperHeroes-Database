@@ -1,10 +1,10 @@
-DROP TABLE IF EXISTS superhero.hero_power;
+DROP TABLE IF EXISTS "superhero"."hero_power";
 
-CREATE TABLE superhero.hero_power (
+CREATE TABLE "superhero"."hero_power" (
   hero_id INT DEFAULT NULL,
   power_id INT DEFAULT NULL,
-  CONSTRAINT fk_hpo_hero FOREIGN KEY (hero_id) REFERENCES superhero.superhero (id),
-  CONSTRAINT fk_hpo_po FOREIGN KEY (power_id) REFERENCES superhero.superpower (id)
+  CONSTRAINT fk_hpo_hero FOREIGN KEY (hero_id) REFERENCES "superhero"."superhero" (id),
+  CONSTRAINT fk_hpo_po FOREIGN KEY (power_id) REFERENCES "superhero"."superpower" (id)
 );
 
 

@@ -1,7 +1,6 @@
 import pandas as pd
 import psycopg2
 
-# Настройки подключения
 DB_CONFIG = {
     'host': 'localhost',
     'port': 5432,
@@ -10,7 +9,6 @@ DB_CONFIG = {
     'password': '1234'
 }
 
-# Ваши запросы (указаны таблицы со схемой superhero)
 QUERIES = {
     'sample_heroes': """
         SELECT id, superhero_name, full_name, publisher_id
@@ -33,6 +31,63 @@ QUERIES = {
         GROUP BY sp.power_name
         ORDER BY heroes_with_power DESC
         LIMIT 50;
+    """,
+    'alignment_count': """
+        SELECT al.alignment, COUNT(s.id) AS cnt
+        FROM superhero.alignment al
+        LEFT JOIN superhero.superhero s ON s.alignment_id = al.id
+        GROUP BY al.alignment
+        ORDER BY cnt DESC;
+    """,
+    'tallest_heroes': """
+        SELECT id, superhero_name, height_cm
+        FROM superhero.superhero
+        WHERE height_cm IS NOT NULL
+        ORDER BY height_cm DESC
+        LIMIT 10;
+    """,
+    'heaviest_heroes': """
+        SELECT id, superhero_name, weight_kg
+        FROM superhero.superhero
+        WHERE weight_kg IS NOT NULL
+        ORDER BY weight_kg DESC
+        LIMIT 10;
+    """,
+    'heroes_no_attributes_or_powers': """
+        SELECT s.id, s.superhero_name
+        FROM superhero.superhero s
+        LEFT JOIN superhero.hero_attribute ha ON s.id = ha.hero_id
+        LEFT JOIN superhero.hero_power hp ON s.id = hp.hero_id
+        WHERE ha.hero_id IS NULL AND hp.hero_id IS NULL
+        LIMIT 50;
+    """,
+    'most_powers': """
+        SELECT s.id, s.superhero_name, COUNT(hp.power_id) AS power_count
+        FROM superhero.superhero s
+        LEFT JOIN superhero.hero_power hp ON s.id = hp.hero_id
+        GROUP BY s.id, s.superhero_name
+        ORDER BY power_count DESC
+        LIMIT 20;
+    """,
+    'average_attributes_by_alignment': """
+        WITH totals AS (
+          SELECT s.id, s.alignment_id, COALESCE(SUM(ha.attribute_value),0) AS total_attr
+          FROM superhero.superhero s
+          LEFT JOIN superhero.hero_attribute ha ON s.id = ha.hero_id
+          GROUP BY s.id, s.alignment_id
+        )
+        SELECT al.alignment, AVG(t.total_attr)::numeric(8,2) AS avg_total_attributes
+        FROM totals t
+        LEFT JOIN superhero.alignment al ON t.alignment_id = al.id
+        GROUP BY al.alignment
+        ORDER BY avg_total_attributes DESC;
+    """,
+    'race_distribution': """
+        SELECT r.race, COUNT(s.id) AS cnt
+        FROM superhero.race r
+        LEFT JOIN superhero.superhero s ON s.race_id = r.id
+        GROUP BY r.race
+        ORDER BY cnt DESC;
     """
 }
 
@@ -45,7 +100,6 @@ def run_query(conn, sql):
 def main():
     conn = get_connection()
     try:
-        # Устанавливаем search_path в схему superhero, чтобы можно было без схемы
         with conn.cursor() as cur:
             cur.execute("SET search_path TO superhero;")
         for name, q in QUERIES.items():

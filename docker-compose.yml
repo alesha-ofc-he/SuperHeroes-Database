@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # 1. POSTGRESQL DATABASE (db)
+  db:
+    image: postgres:14
+    container_name: superheroes
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1234
+      POSTGRES_DB: superheroes # Database name
+    ports:
+      - "5433:5432"
+    volumes:
+      # Loads all SQL scripts from the current directory into the DB
+      - .:/docker-entrypoint-initdb.d 
+    
+    # 🌟 HEALTHCHECK: Ensures the DB is ready to accept connections
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d superheroes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10 # Увеличиваем количество попыток ожидания
+      start_period: 30s # Даем 30 секунд на запуск и инициализацию
+
+  # 2. PYTHON APPLICATION (app)
+  app:
+    build: .
+    container_name: superheroes_app
+    environment:
+      DB_URL: "postgresql+psycopg2://postgres:1234@db:5432/superheroes"
+    
+    # 🌟 DEPENDENCY: Waits until the 'db' container reports 'healthy' status
+    depends_on:
+      db:
+        condition: service_healthy 
+        
+    volumes:
+      - .:/app
+      - ./charts:/app/charts
+      - ./exports:/app/exports
