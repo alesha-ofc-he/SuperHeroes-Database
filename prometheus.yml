@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # ============================================================================
+  # 1. Prometheus - мониторит сам себя
+  # ============================================================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ============================================================================
+  # 2. PostgreSQL Exporter - мониторит БД (Dashboard 1: 30 points)
+  # ============================================================================
+  - job_name: 'postgres'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  # ============================================================================
+  # 3. Node Exporter - мониторит систему (Dashboard 2: 25 points)
+  # ============================================================================
+  - job_name: 'node'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # ============================================================================
+  # 4. Custom Exporter - Comic API (Dashboard 3: 45 points) ⭐ ГЛАВНЫЙ
+  # ============================================================================
+  - job_name: 'comics'
+    scrape_interval: 20s
+    static_configs:
+      - targets: ['custom-exporter:8000']

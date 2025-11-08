@@ -54,7 +54,7 @@ def run_query(sql_query, title):
                 sys.exit(1)
 
 
-def generate_chart(df, chart_type, title, filename, x_label=None, y_label=None, x_col=None, y_col=None, **kwargs):
+def generate_chart(df, chart_type, title, filename, x_label=None, y_label=None, x_col=None, y_col=None, color_col=None, **kwargs):
     """Generates a Matplotlib chart, saves it to /charts/, and prints a console report."""
     
     if df.empty:
@@ -82,11 +82,18 @@ def generate_chart(df, chart_type, title, filename, x_label=None, y_label=None, 
     elif chart_type == 'line':
         plot_data.plot.line(marker='o', **kwargs)
     elif chart_type == 'histogram':
-        df[x_col].plot.hist(bins=15, edgecolor='black', alpha=0.7, **kwargs)
+        # Histogram must use x_col explicitly
+        df[x_col].plot.hist(bins=kwargs.pop('bins', 15), edgecolor='black', alpha=0.7, **kwargs)
     elif chart_type == 'scatter':
-        plt.scatter(df[x_col], df[y_col], **kwargs)
-        if 'c' in kwargs: 
-             plt.legend(*plt.gca().get_legend_handles_labels(), title='Alignment' if 'alignment' in df.columns else df.columns[-1])
+        # Scatter must handle potential coloring
+        if color_col and color_col in df.columns:
+            groups = df.groupby(color_col)
+            for name, group in groups:
+                plt.scatter(group[x_col], group[y_col], label=name, **kwargs)
+            plt.legend(title=color_col)
+        else:
+             plt.scatter(df[x_col], df[y_col], **kwargs)
+
     
     # General chart aesthetics
     plt.title(title)
@@ -156,26 +163,28 @@ GROUP BY p.publisher_name, a.attribute_name
 ORDER BY p.publisher_name, a.attribute_name;
 """
 
-# 5. Histogram: Height Distribution for Marvel Comics Heroes (2 JOINs)
+# 5. Histogram (Improved): Distribution of Total Attributes (3 JOINs)
 query_hist = """
-SELECT s.height_cm
+SELECT COALESCE(SUM(ha.attribute_value), 0) AS total_attributes
 FROM "superhero"."superhero" s 
-JOIN "superhero"."publisher" p ON s.publisher_id = p.id 
-WHERE p.publisher_name = 'Marvel Comics' AND s.height_cm IS NOT NULL AND s.height_cm > 0;
+LEFT JOIN "superhero"."hero_attribute" ha ON s.id = ha.hero_id
+GROUP BY s.id
+HAVING COALESCE(SUM(ha.attribute_value), 0) > 0;
 """
 
-# 6. Scatter Plot: Durability vs Power for 'Good' Alignment Heroes (3 JOINs + CTE)
+# 6. Scatter Plot (Improved): Intelligence vs Combat by Publisher (4 JOINs)
 query_scatter = """
-SELECT T1.superhero_name,
-       MAX(CASE WHEN T2.attribute_name = 'Durability' THEN T3.attribute_value END) AS Durability,
-       MAX(CASE WHEN T2.attribute_name = 'Power' THEN T3.attribute_value END) AS Power,
-       T4.alignment
-FROM "superhero"."superhero" T1 
-JOIN "superhero"."attribute" T2 ON 1=1
-JOIN "superhero"."hero_attribute" T3 ON T1.id = T3.hero_id AND T2.id = T3.attribute_id 
-JOIN "superhero"."alignment" T4 ON T1.alignment_id = T4.id 
-WHERE T4.alignment = 'Good' AND T2.attribute_name IN ('Durability', 'Power')
-GROUP BY T1.superhero_name, T4.alignment;
+SELECT p.publisher_name,
+       MAX(CASE WHEN a.attribute_name = 'Intelligence' THEN ha.attribute_value END) AS Intelligence,
+       MAX(CASE WHEN a.attribute_name = 'Combat' THEN ha.attribute_value END) AS Combat
+FROM "superhero"."superhero" s
+JOIN "superhero"."publisher" p ON s.publisher_id = p.id
+LEFT JOIN "superhero"."hero_attribute" ha ON s.id = ha.hero_id
+LEFT JOIN "superhero"."attribute" a ON ha.attribute_id = a.id
+WHERE p.publisher_name IN ('Marvel Comics', 'DC Comics')
+GROUP BY s.id, p.publisher_name
+HAVING MAX(CASE WHEN a.attribute_name = 'Intelligence' THEN ha.attribute_value END) IS NOT NULL
+   AND MAX(CASE WHEN a.attribute_name = 'Combat' THEN ha.attribute_value END) IS NOT NULL;
 """
 
 
@@ -256,9 +265,6 @@ def export_plotly_data_to_excel(df, filename):
     full_path = os.path.join('exports', filename)
     
     # FIX for KeyError: Ensure we drop the 'year_of_debut_str' column only if it exists
-    # Since we moved its creation to generate_plotly_slider, it should not exist here unless
-    # called multiple times, but let's be explicit and remove the dropping attempt. 
-    # We will rename the DataFrame to avoid confusion with the version that has '_str'.
     df_export = df.rename(columns={'year_of_debut': 'Year_of_Debut'})
     
     with pd.ExcelWriter(full_path, engine='openpyxl') as writer:
@@ -399,16 +405,16 @@ if __name__ == '__main__':
     print("Chart Type: LINE. Saved to: charts/line_intel_vs_strength_md.png")
     print("Shows: Trend comparison of average strength and intelligence between Marvel and DC.")
 
-    # 5. Histogram
-    df_hist = run_query(query_hist, "Height Distribution for Marvel Comics Heroes")
-    generate_chart(df_hist, 'histogram', "Height Distribution for Marvel Comics Heroes (cm)", "hist_marvel_height.png", 
-                   x_label="Height (cm)", y_label="Frequency (Number of Heroes)", x_col='height_cm')
+    # 5. Histogram (Improved)
+    df_hist = run_query(query_hist, "Distribution of Total Attribute Scores (Power Level)")
+    generate_chart(df_hist, 'histogram', "Distribution of Total Attribute Scores (Max 600)", "hist_total_attributes.png", 
+                   x_label="Total Attribute Score (Power Level)", y_label="Frequency (Number of Heroes)", x_col='total_attributes', bins=20)
 
-    # 6. Scatter Plot
-    df_scatter = run_query(query_scatter, "Durability vs Power for 'Good' Alignment Heroes")
-    generate_chart(df_scatter, 'scatter', "Durability (X) vs Power (Y) for 'Good' Heroes", "scatter_durability_vs_power.png", 
-                   x_label="Durability Rating", y_label="Power Rating", 
-                   x_col='durability', y_col='power')
+    # 6. Scatter Plot (Improved)
+    df_scatter = run_query(query_scatter, "Intelligence vs Combat Rating by Publisher")
+    generate_chart(df_scatter, 'scatter', "Intelligence vs Combat Rating (Marvel vs DC)", "scatter_intel_vs_combat.png", 
+                   x_label="Intelligence Rating (1-100)", y_label="Combat Rating (1-100)", 
+                   x_col='intelligence', y_col='combat', color_col='publisher_name')
 
     # --- TASK 3: EXECUTE EXPORT TO MAIN EXCEL REPORT ---
     df_excel_1 = run_query(query_excel_1, "Excel Data: Top 100 Heroes by Total Attributes")
@@ -425,7 +431,7 @@ if __name__ == '__main__':
     # --- TASK 2: PLOTLY SLIDER DEMO (Interactive HTML Save) ---
     df_plotly_data = generate_plotly_data()
     
-    # 1. Save data to a separate Excel file (New requirement)
+    # 1. Save data to a separate Excel file
     export_plotly_data_to_excel(df_plotly_data, "plotly_slider_data.xlsx")
     
     # 2. Generate and save the interactive HTML chart

@@ -1,0 +1,144 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # 1️⃣ PostgreSQL Database
+  # ============================================================================
+  db:
+    image: postgres:15
+    container_name: superheroes_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: superset_db
+      POSTGRES_USER: superset_user
+      POSTGRES_PASSWORD: "Pg!Super1234"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init-scripts:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"
+    command: ["postgres", "-c", "listen_addresses=*"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset_user -d superset_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ============================================================================
+  # 2️⃣ Prometheus
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # 3️⃣ Grafana
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+      GF_SECURITY_ADMIN_USER: "admin"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # 4️⃣ PostgreSQL Exporter
+  # ============================================================================
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_NAME: "postgresql://superset_user:Pg!Super1234@db:5432/superset_db?sslmode=disable"
+    ports:
+      - "9187:9187"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9187/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # 5️⃣ Node Exporter
+  # ============================================================================
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # 6️⃣ Custom Exporter - Comic API (ГЛАВНЫЙ!)
+  # ============================================================================
+  custom-exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile.custom
+    container_name: custom-exporter
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      EXPORTER_PORT: "8000"
+      SCRAPE_INTERVAL: "20"
+    volumes:
+      - ./custom_exporter_superheroapi.py:/app/custom_exporter.py:ro
+      - ./requirements-prometheus.txt:/app/requirements.txt:ro
+    command: ["python", "custom_exporter.py"]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

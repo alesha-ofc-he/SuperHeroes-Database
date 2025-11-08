@@ -1,42 +1,104 @@
-version: '3.8'
-
 services:
-  # 1. POSTGRESQL DATABASE (db)
+  # 1️⃣ PostgreSQL Database
   db:
-    image: postgres:14
-    container_name: superheroes
-    restart: always
+    image: postgres:15
+    container_name: superheroes_db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 1234
-      POSTGRES_DB: superheroes # Database name
+      POSTGRES_DB: superset_db
+      POSTGRES_USER: superset_user
+      POSTGRES_PASSWORD: "Pg!Super1234"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init-scripts:/docker-entrypoint-initdb.d:ro
     ports:
       - "5433:5432"
-    volumes:
-      # Loads all SQL scripts from the current directory into the DB
-      - .:/docker-entrypoint-initdb.d 
-    
-    # 🌟 HEALTHCHECK: Ensures the DB is ready to accept connections
+    command: ["postgres", "-c", "listen_addresses=*"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d superheroes"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U superset_user -d superset_db"]
+      interval: 10s
       timeout: 5s
-      retries: 10 # Увеличиваем количество попыток ожидания
-      start_period: 30s # Даем 30 секунд на запуск и инициализацию
+      retries: 10
 
-  # 2. PYTHON APPLICATION (app)
-  app:
-    build: .
-    container_name: superheroes_app
-    environment:
-      DB_URL: "postgresql+psycopg2://postgres:1234@db:5432/superheroes"
-    
-    # 🌟 DEPENDENCY: Waits until the 'db' container reports 'healthy' status
+  # 2️⃣ Apache Superset
+  superset:
+    image: apache/superset:latest-dev
+    container_name: superset_bi
+    restart: unless-stopped
     depends_on:
       db:
-        condition: service_healthy 
-        
+        condition: service_healthy
+    environment:
+      SUPERSET_SECRET_KEY: "Sup3r$$ecretKey_9tW"
+      SUPERSET_CONFIG_PATH: "/app/pythonpath/superset_config.py"
     volumes:
-      - .:/app
-      - ./charts:/app/charts
-      - ./exports:/app/exports
+      - ./superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset_home:/app/superset_home
+      - ./docker-init.sh:/app/docker-init.sh:ro
+    ports:
+      - "8088:8088"
+    command: ["/bin/bash", "/app/docker-init.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8088/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # 3️⃣ Python Application for Data Refresh (Task 2 & 10)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: superheroes_app
+    restart: unless-stopped
+    environment:
+      # Строка подключения для Python-скрипта
+      DATABASE_URI: "postgresql+psycopg2://superset_user:Pg!Super1234@db:5432/superset_db"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Монтируем скрипт для выполнения
+      - ./auto_refresh.py:/app/auto_refresh.py:ro
+      - ./requirements.txt:/app/requirements.txt:ro
+    command: ["python", "auto_refresh.py"]
+  
+  db-activity-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.activity
+    container_name: db-activity-simulator
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: "db"
+      DB_PORT: "5432"
+      DB_NAME: "superset_db"
+      DB_USER: "superset_user"
+      DB_PASS: "Pg!Super1234"
+    command: ["python", "db_activity_simulator.py"]
+  
+  db-load-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile.load
+    container_name: db-load-generator
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - PGHOST=db
+      - PGPORT=5432
+      - PGDATABASE=superset_db
+      - PGUSER=superset_user
+      - PGPASSWORD=Pg!Super1234
+    command: ["python", "db_load_generator.py"]
+    networks:
+      - default
+
+volumes:
+  pgdata:
+  superset_home:

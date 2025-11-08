@@ -1,15 +1,20 @@
-# Use a slim Python image
 FROM python:3.11-slim
 
-# Set the working directory inside the container
+# Установка системных зависимостей, необходимых для psycopg2
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy the requirements file and install dependencies
 COPY requirements.txt .
+
+# Установка Python-зависимостей
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
-COPY . .
+# Копирование основного скрипта
+COPY auto_refresh.py .
 
-# Command to run the analytics script when the container starts
-CMD ["python", "analytics.py"]
+CMD ["python", "auto_refresh.py"]
